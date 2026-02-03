@@ -13,7 +13,7 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 const SCORING_CONFIG = {
   BASE_POINTS: [100, 70, 50, 35, 24, 16, 10, 6],
   PLAYER_COUNT_MULTIPLIERS: { 2: 0.60, 3: 0.75, 4: 0.90, 5: 1.00, 6: 1.10, 7: 1.15, 8: 1.20 },
-  PARTICIPATION_BONUS_PER_GAME: 0.5
+  PARTICIPATION_MULTIPLIER: 2  // sqrt(games) × this value
 };
 
 function calculateMatchPoints({ placement, playerCount, durationMinutes, complexity, isCoop, isTeam, datePlayed, includeRecency = true }) {
@@ -90,6 +90,16 @@ function Avatar({ name, url, size = 40 }) {
   const colors = ['#4F46E5', '#7C3AED', '#DB2777', '#D97706', '#059669', '#0891B2'];
   const colorIndex = name.charCodeAt(0) % colors.length;
   
+  if (url) {
+    return (
+      <img 
+        src={url} 
+        alt={name} 
+        style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} 
+      />
+    );
+  }
+  
   return (
     <div style={{ width: size, height: size, borderRadius: '50%', backgroundColor: colors[colorIndex], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.4, fontWeight: 700, color: 'white', flexShrink: 0 }}>
       {initials}
@@ -165,7 +175,7 @@ function Leaderboard({ players, matches }) {
       });
     });
     
-    return Object.values(playerScores).map(ps => ({ ...ps.player, avgPoints: ps.games > 0 ? ps.totalPoints / ps.games : 0, participationBonus: ps.games * SCORING_CONFIG.PARTICIPATION_BONUS_PER_GAME, totalScore: ps.games > 0 ? (ps.totalPoints / ps.games) + (ps.games * SCORING_CONFIG.PARTICIPATION_BONUS_PER_GAME) : 0, gamesPlayed: ps.games })).sort((a, b) => b.totalScore - a.totalScore);
+    return Object.values(playerScores).map(ps => ({ ...ps.player, avgPoints: ps.games > 0 ? ps.totalPoints / ps.games : 0, participationBonus: Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER, totalScore: ps.games > 0 ? (ps.totalPoints / ps.games) + (Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER) : 0, gamesPlayed: ps.games })).sort((a, b) => b.totalScore - a.totalScore);
   }, [players, matches]);
   
   return (
@@ -399,10 +409,13 @@ function PlayerProfile({ player, matches, games, onClose }) {
 }
 
 function AnnualChampions({ players, matches }) {
+  const currentYear = new Date().getFullYear();
+  
   const years = useMemo(() => {
     const yearSet = new Set(matches.map(m => new Date(m.date_played).getFullYear()));
-    return [...yearSet].sort((a, b) => b - a);
-  }, [matches]);
+    // Exclude current year - champion only crowned after year ends
+    return [...yearSet].filter(y => y < currentYear).sort((a, b) => b - a);
+  }, [matches, currentYear]);
   
   const champions = useMemo(() => {
     return years.map(year => {
@@ -420,7 +433,7 @@ function AnnualChampions({ players, matches }) {
         });
       });
       
-      const rankings = Object.values(playerScores).filter(ps => ps.games > 0).map(ps => ({ ...ps.player, totalScore: (ps.totalPoints / ps.games) + (ps.games * SCORING_CONFIG.PARTICIPATION_BONUS_PER_GAME), gamesPlayed: ps.games })).sort((a, b) => b.totalScore - a.totalScore);
+      const rankings = Object.values(playerScores).filter(ps => ps.games > 0).map(ps => ({ ...ps.player, totalScore: (ps.totalPoints / ps.games) + (Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER), gamesPlayed: ps.games })).sort((a, b) => b.totalScore - a.totalScore);
       return { year, champion: rankings[0], runnerUp: rankings[1] };
     });
   }, [years, players, matches]);
@@ -919,7 +932,7 @@ export default function App() {
             <div style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: '#FEF3C7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Trophy size={22} color={COLORS.gold} />
             </div>
-            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: COLORS.text }}>Game Night Leaderboard</h1>
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: COLORS.text }}>The League Leaderboard</h1>
           </div>
           
           <nav style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
