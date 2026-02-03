@@ -1,55 +1,14 @@
-import React, { useState, useMemo } from 'react';
-import { Trophy, Users, Gamepad2, Calendar, TrendingUp, Plus, Star, Medal, Crown, Target, Award, ChevronRight, Clock, Brain, History, X, Check, Filter, Search } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Trophy, Users, Gamepad2, Calendar, TrendingUp, Plus, Star, Medal, Crown, Target, Award, ChevronRight, Clock, Brain, History, X, Check, Filter, Search, Loader2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { createClient } from '@supabase/supabase-js';
 
-const INITIAL_PLAYERS = [
-  { id: '1', name: 'Aaron', avatar_url: null },
-  { id: '2', name: 'Bren', avatar_url: null },
-  { id: '3', name: 'Darryn', avatar_url: null },
-  { id: '4', name: 'Laura', avatar_url: null },
-  { id: '5', name: 'Tessa', avatar_url: null },
-];
+// Initialize Supabase client
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-const INITIAL_GAMES = [
-  { id: '1', name: 'Wingspan', image_url: null, duration_minutes: 60, complexity: 2.45, is_coop: false, is_team: false },
-  { id: '2', name: 'Catan', image_url: null, duration_minutes: 90, complexity: 2.32, is_coop: false, is_team: false },
-  { id: '3', name: 'Pandemic', image_url: null, duration_minutes: 45, complexity: 2.42, is_coop: true, is_team: false },
-  { id: '4', name: 'Ticket to Ride', image_url: null, duration_minutes: 60, complexity: 1.83, is_coop: false, is_team: false },
-  { id: '5', name: 'Codenames', image_url: null, duration_minutes: 20, complexity: 1.31, is_coop: false, is_team: true },
-  { id: '6', name: 'Azul', image_url: null, duration_minutes: 45, complexity: 1.77, is_coop: false, is_team: false },
-];
-
-const generateSampleMatches = () => {
-  const matches = [];
-  const gameSequence = [0, 1, 3, 2, 0, 5, 1, 4, 0, 3, 2, 1, 5, 0, 4, 3, 1, 0, 2, 5, 0, 1, 3, 0, 4, 2, 5, 1, 0, 3];
-  const startDate = new Date('2024-01-15');
-  
-  for (let i = 0; i < 30; i++) {
-    const game = INITIAL_GAMES[gameSequence[i % gameSequence.length]];
-    const playerCount = [3, 4, 5, 4, 3, 5, 4, 4, 5, 3, 4, 5, 3, 4, 5, 4, 3, 5, 4, 4, 5, 3, 4, 5, 4, 3, 5, 4, 5, 3][i];
-    const shuffledPlayers = [...INITIAL_PLAYERS].sort(() => 0.5 - Math.random()).slice(0, playerCount);
-    
-    const date = new Date(startDate);
-    date.setDate(date.getDate() + (i * 10) + Math.floor(Math.random() * 5));
-    
-    const results = shuffledPlayers.map((player, idx) => ({
-      player_id: player.id,
-      players: player,
-      placement: game.is_coop ? (Math.random() > 0.4 ? 1 : 2) : idx + 1
-    }));
-    
-    matches.push({
-      id: `match-${i + 1}`,
-      match_number: i + 1,
-      game_id: game.id,
-      games: game,
-      date_played: date.toISOString().split('T')[0],
-      match_results: results
-    });
-  }
-  
-  return matches.sort((a, b) => new Date(b.date_played) - new Date(a.date_played));
-};
+// Placeholder while loading
 
 const SCORING_CONFIG = {
   BASE_POINTS: [100, 70, 50, 35, 24, 16, 10, 6],
@@ -796,25 +755,161 @@ function AddGameForm({ onSubmit, onClose }) {
 
 export default function App() {
   const [view, setView] = useState('home');
-  const [players] = useState(INITIAL_PLAYERS);
-  const [games, setGames] = useState(INITIAL_GAMES);
-  const [matches, setMatches] = useState(generateSampleMatches);
+  const [players, setPlayers] = useState([]);
+  const [games, setGames] = useState([]);
+  const [matches, setMatches] = useState([]);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [showAddResult, setShowAddResult] = useState(false);
   const [showAddGame, setShowAddGame] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Fetch all data from Supabase on mount
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setLoading(true);
+        
+        // Fetch players
+        const { data: playersData, error: playersError } = await supabase
+          .from('players')
+          .select('*')
+          .order('name');
+        if (playersError) throw playersError;
+        
+        // Fetch games
+        const { data: gamesData, error: gamesError } = await supabase
+          .from('games')
+          .select('*')
+          .order('name');
+        if (gamesError) throw gamesError;
+        
+        // Fetch matches with related data
+        const { data: matchesData, error: matchesError } = await supabase
+          .from('matches')
+          .select(`
+            *,
+            games (*),
+            match_results (
+              *,
+              players (*)
+            )
+          `)
+          .order('date_played', { ascending: false });
+        if (matchesError) throw matchesError;
+        
+        setPlayers(playersData || []);
+        setGames(gamesData || []);
+        setMatches(matchesData || []);
+      } catch (err) {
+        console.error('Error fetching data:', err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    fetchData();
+  }, []);
   
-  const handleAddResult = (data) => {
-    const game = games.find(g => g.id === data.gameId);
-    const newMatch = { id: `match-${matches.length + 1}`, match_number: matches.length + 1, game_id: data.gameId, games: game, date_played: data.datePlayed, match_results: data.results.map(r => ({ player_id: r.playerId, players: players.find(p => p.id === r.playerId), placement: r.placement })) };
-    setMatches(prev => [newMatch, ...prev]);
-    setShowAddResult(false);
+  const handleAddResult = async (data) => {
+    try {
+      // Insert match
+      const { data: newMatch, error: matchError } = await supabase
+        .from('matches')
+        .insert({
+          game_id: data.gameId,
+          date_played: data.datePlayed
+        })
+        .select()
+        .single();
+      
+      if (matchError) throw matchError;
+      
+      // Insert match results
+      const matchResults = data.results.map(r => ({
+        match_id: newMatch.id,
+        player_id: r.playerId,
+        placement: r.placement
+      }));
+      
+      const { error: resultsError } = await supabase
+        .from('match_results')
+        .insert(matchResults);
+      
+      if (resultsError) throw resultsError;
+      
+      // Refetch matches to get the complete data with joins
+      const { data: updatedMatches } = await supabase
+        .from('matches')
+        .select(`
+          *,
+          games (*),
+          match_results (
+            *,
+            players (*)
+          )
+        `)
+        .order('date_played', { ascending: false });
+      
+      setMatches(updatedMatches || []);
+      setShowAddResult(false);
+    } catch (err) {
+      console.error('Error adding result:', err);
+      alert('Failed to add result: ' + err.message);
+    }
   };
   
-  const handleAddGame = (data) => {
-    const newGame = { id: `game-${games.length + 1}`, ...data, image_url: null };
-    setGames(prev => [...prev, newGame]);
-    setShowAddGame(false);
+  const handleAddGame = async (data) => {
+    try {
+      const { data: newGame, error } = await supabase
+        .from('games')
+        .insert({
+          name: data.name,
+          duration_minutes: data.duration_minutes,
+          complexity: data.complexity,
+          is_coop: data.is_coop,
+          is_team: data.is_team
+        })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      setGames(prev => [...prev, newGame].sort((a, b) => a.name.localeCompare(b.name)));
+      setShowAddGame(false);
+    } catch (err) {
+      console.error('Error adding game:', err);
+      alert('Failed to add game: ' + err.message);
+    }
   };
+  
+  // Loading state
+  if (loading) {
+    return (
+      <div style={{ minHeight: '100vh', backgroundColor: COLORS.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <Loader2 size={48} color={COLORS.accent} style={{ animation: 'spin 1s linear infinite' }} />
+          <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+          <p style={{ marginTop: 16, color: COLORS.textMuted, fontSize: 16 }}>Loading leaderboard...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  // Error state
+  if (error) {
+    return (
+      <div style={{ minHeight: '100vh', backgroundColor: COLORS.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', padding: 24 }}>
+          <div style={{ color: COLORS.error, fontSize: 48, marginBottom: 16 }}>⚠️</div>
+          <h2 style={{ color: COLORS.text, marginBottom: 8 }}>Failed to load data</h2>
+          <p style={{ color: COLORS.textMuted, marginBottom: 16 }}>{error}</p>
+          <p style={{ color: COLORS.textMuted, fontSize: 14 }}>Check that your Supabase URL and API key are correct in your .env file.</p>
+        </div>
+      </div>
+    );
+  }
   
   return (
     <div style={{ minHeight: '100vh', backgroundColor: COLORS.bg, color: COLORS.text, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
