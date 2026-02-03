@@ -11,19 +11,16 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 // Placeholder while loading
 
 const SCORING_CONFIG = {
-  BASE_POINTS: [100, 70, 50, 35, 24, 16, 10, 6],
-  PLAYER_COUNT_MULTIPLIERS: { 2: 0.60, 3: 0.75, 4: 0.90, 5: 1.00, 6: 1.10, 7: 1.15, 8: 1.20 },
-  PARTICIPATION_MULTIPLIER: 1  // sqrt(games) × this value (reduced for balanced 100-scaled ratings)
+  PLACEMENT_EXPONENT: 1.25,  // Higher = more reward for winning
+  BASELINE_PLAYERS: 4,       // 4-player game is the baseline
+  PARTICIPATION_MULTIPLIER: 1  // sqrt(games) × this value
 };
 
 function calculateMatchPoints({ placement, playerCount, durationMinutes, complexity, isCoop, isTeam, datePlayed, includeRecency = true, referenceDate = null }) {
-  const basePoints = SCORING_CONFIG.BASE_POINTS[Math.min(placement - 1, 7)];
-  const beatenPlayers = playerCount - placement;
-  const maxBeatable = Math.max(playerCount - 1, 1);
-  const beatRatio = beatenPlayers / maxBeatable;
-  const adjustedBase = basePoints * (0.5 + 0.5 * beatRatio);
+  // New formula: (proportion of field beaten)^1.25 * (players/4) * 100
+  const proportionBeaten = (playerCount - placement + 1) / playerCount;
+  const basePoints = Math.pow(proportionBeaten, SCORING_CONFIG.PLACEMENT_EXPONENT) * (playerCount / SCORING_CONFIG.BASELINE_PLAYERS) * 100;
   
-  const playerCountMult = SCORING_CONFIG.PLAYER_COUNT_MULTIPLIERS[Math.min(Math.max(playerCount, 2), 8)] || 1.0;
   const timeMult = durationMinutes / 60;
   const complexityMult = Math.max(0.9, Math.min(1.15, 0.9 + complexity * 0.05));
   const gameTypeMult = isCoop ? 0.25 : isTeam ? 0.75 : 1.0;
@@ -39,7 +36,7 @@ function calculateMatchPoints({ placement, playerCount, durationMinutes, complex
     }
   }
   
-  return adjustedBase * playerCountMult * timeMult * complexityMult * gameTypeMult * recencyMult;
+  return basePoints * timeMult * complexityMult * gameTypeMult * recencyMult;
 }
 
 function generateMatchSummary(match) {
