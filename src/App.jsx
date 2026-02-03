@@ -16,7 +16,7 @@ const SCORING_CONFIG = {
   PARTICIPATION_MULTIPLIER: 1  // sqrt(games) × this value (reduced for balanced 100-scaled ratings)
 };
 
-function calculateMatchPoints({ placement, playerCount, durationMinutes, complexity, isCoop, isTeam, datePlayed, includeRecency = true }) {
+function calculateMatchPoints({ placement, playerCount, durationMinutes, complexity, isCoop, isTeam, datePlayed, includeRecency = true, referenceDate = null }) {
   const basePoints = SCORING_CONFIG.BASE_POINTS[Math.min(placement - 1, 7)];
   const beatenPlayers = playerCount - placement;
   const maxBeatable = Math.max(playerCount - 1, 1);
@@ -30,7 +30,8 @@ function calculateMatchPoints({ placement, playerCount, durationMinutes, complex
   
   let recencyMult = 1.0;
   if (includeRecency) {
-    const daysSince = Math.floor((new Date() - new Date(datePlayed)) / (1000 * 60 * 60 * 24));
+    const refDate = referenceDate || new Date();
+    const daysSince = Math.floor((refDate - new Date(datePlayed)) / (1000 * 60 * 60 * 24));
     if (daysSince > 365 * 4) recencyMult = 0.25;
     else if (daysSince > 365) {
       const decayProgress = (daysSince - 365) / (365 * 3);
@@ -249,27 +250,67 @@ function RecentGames({ matches }) {
 
 function RatingHistoryChart({ players, matches }) {
   const chartData = useMemo(() => {
-    const monthlyScores = {};
+    if (matches.length === 0) return [];
+    
     const sortedMatches = [...matches].sort((a, b) => new Date(a.date_played) - new Date(b.date_played));
     
-    sortedMatches.forEach(match => {
-      const monthKey = match.date_played.substring(0, 7);
-      if (!monthlyScores[monthKey]) {
-        monthlyScores[monthKey] = {};
-        players.forEach(p => monthlyScores[monthKey][p.id] = { total: 0, count: 0 });
-      }
-      match.match_results.forEach(result => {
-        const points = calculateMatchPoints({ placement: result.placement, playerCount: match.match_results.length, durationMinutes: match.games.duration_minutes, complexity: parseFloat(match.games.complexity), isCoop: match.games.is_coop, isTeam: match.games.is_team, datePlayed: match.date_played, includeRecency: false });
-        if (monthlyScores[monthKey][result.player_id]) {
-          monthlyScores[monthKey][result.player_id].total += points;
-          monthlyScores[monthKey][result.player_id].count++;
-        }
-      });
-    });
+    // Get all unique months from the data
+    const months = [...new Set(sortedMatches.map(m => m.date_played.substring(0, 7)))].sort();
     
-    return Object.entries(monthlyScores).map(([month, scores]) => {
-      const entry = { month };
-      players.forEach(p => { entry[p.name] = scores[p.id].count > 0 ? Math.round((scores[p.id].total / scores[p.id].count) * 10) / 10 : null; });
+    // For each month, calculate what the standings would have been at that point
+    return months.map(monthKey => {
+      // Reference date is end of this month
+      const [year, month] = monthKey.split('-').map(Number);
+      const referenceDate = new Date(year, month, 0); // Last day of month
+      
+      // Get all matches up to and including this month
+      const matchesToDate = sortedMatches.filter(m => m.date_played.substring(0, 7) <= monthKey);
+      
+      // Calculate scores for each player as of this date
+      const playerScores = {};
+      players.forEach(p => { playerScores[p.id] = { totalPoints: 0, games: 0 }; });
+      
+      matchesToDate.forEach(match => {
+        const playerCount = match.match_results.length;
+        match.match_results.forEach(result => {
+          if (playerScores[result.player_id]) {
+            // Calculate points with recency relative to this historical date
+            const points = calculateMatchPoints({
+              placement: result.placement,
+              playerCount,
+              durationMinutes: match.games.duration_minutes,
+              complexity: parseFloat(match.games.complexity),
+              isCoop: match.games.is_coop,
+              isTeam: match.games.is_team,
+              datePlayed: match.date_played,
+              includeRecency: true,
+              referenceDate
+            });
+            playerScores[result.player_id].totalPoints += points;
+            playerScores[result.player_id].games++;
+          }
+        });
+      });
+      
+      // Calculate raw scores
+      const rawScores = Object.entries(playerScores)
+        .filter(([_, data]) => data.games > 0)
+        .map(([id, data]) => {
+          const avgPoints = data.totalPoints / data.games;
+          const participationBonus = Math.sqrt(data.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER;
+          return { id, rawScore: avgPoints + participationBonus };
+        });
+      
+      // Calculate league average and scale to 100
+      const totalRawScore = rawScores.reduce((sum, p) => sum + p.rawScore, 0);
+      const leagueAverage = rawScores.length > 0 ? totalRawScore / rawScores.length : 1;
+      
+      const entry = { month: monthKey };
+      players.forEach(p => {
+        const playerData = rawScores.find(r => r.id === p.id);
+        entry[p.name] = playerData ? Math.round((playerData.rawScore / leagueAverage) * 100) : null;
+      });
+      
       return entry;
     });
   }, [players, matches]);
@@ -289,11 +330,11 @@ function RatingHistoryChart({ players, matches }) {
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
             <XAxis dataKey="month" stroke={COLORS.textMuted} fontSize={11} />
-            <YAxis stroke={COLORS.textMuted} fontSize={11} />
+            <YAxis stroke={COLORS.textMuted} fontSize={11} domain={[80, 120]} />
             <Tooltip contentStyle={{ backgroundColor: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 8 }} />
             <Legend />
             {players.map((player, idx) => (
-              <Line key={player.id} type="monotone" dataKey={player.name} stroke={playerColors[idx % playerColors.length]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              <Line key={player.id} type="monotone" dataKey={player.name} stroke={playerColors[idx % playerColors.length]} strokeWidth={2} dot={{ r: 2 }} connectNulls />
             ))}
           </LineChart>
         </ResponsiveContainer>
@@ -345,16 +386,13 @@ function PlayerProfile({ player, matches, games, onClose }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
         <Avatar name={player.name} url={player.avatar_url} size={80} />
-        <div>
+        <div style={{ flex: 1 }}>
           <h2 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: COLORS.text }}>{player.name}</h2>
           <p style={{ margin: '4px 0 0', color: COLORS.textMuted }}>{stats.totalGames} games played · {stats.wins} wins</p>
         </div>
-      </div>
-      
-      <div style={{ display: 'flex', justifyContent: 'center' }}>
-        <div style={{ backgroundColor: COLORS.accentLight, padding: 16, borderRadius: 10, textAlign: 'center', minWidth: 120 }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: COLORS.accent }}>{stats.winRate.toFixed(0)}%</div>
-          <div style={{ fontSize: 13, color: COLORS.textMuted }}>Win Rate</div>
+        <div style={{ backgroundColor: COLORS.accentLight, padding: 12, borderRadius: 10, textAlign: 'center', minWidth: 80 }}>
+          <div style={{ fontSize: 24, fontWeight: 700, color: COLORS.accent }}>{stats.winRate.toFixed(0)}%</div>
+          <div style={{ fontSize: 11, color: COLORS.textMuted }}>Win Rate</div>
         </div>
       </div>
       
