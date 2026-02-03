@@ -213,7 +213,6 @@ function Leaderboard({ players, matches, onPlayerClick }) {
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontWeight: 700, fontSize: 22, color: player.scaledScore >= 100 ? COLORS.success : COLORS.accent }}>{player.scaledScore}</div>
-              <div style={{ color: COLORS.textMuted, fontSize: 11 }}>League avg: 100</div>
             </div>
           </div>
         ))}
@@ -352,18 +351,10 @@ function PlayerProfile({ player, matches, games, onClose }) {
         </div>
       </div>
       
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-        <div style={{ backgroundColor: COLORS.accentLight, padding: 16, borderRadius: 10, textAlign: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div style={{ backgroundColor: COLORS.accentLight, padding: 16, borderRadius: 10, textAlign: 'center', minWidth: 120 }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: COLORS.accent }}>{stats.winRate.toFixed(0)}%</div>
           <div style={{ fontSize: 13, color: COLORS.textMuted }}>Win Rate</div>
-        </div>
-        <div style={{ backgroundColor: COLORS.successLight, padding: 16, borderRadius: 10, textAlign: 'center' }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: COLORS.success }}>{stats.avgPlacement.toFixed(1)}</div>
-          <div style={{ fontSize: 13, color: COLORS.textMuted }}>Avg Place</div>
-        </div>
-        <div style={{ backgroundColor: '#FEF3C7', padding: 16, borderRadius: 10, textAlign: 'center' }}>
-          <div style={{ fontSize: 28, fontWeight: 700, color: COLORS.gold }}>{stats.wins}</div>
-          <div style={{ fontSize: 13, color: COLORS.textMuted }}>Total Wins</div>
         </div>
       </div>
       
@@ -676,9 +667,13 @@ function GamesPage({ games, matches }) {
       {gameStats.map(game => (
         <Card key={game.id}>
           <div style={{ display: 'flex', gap: 16 }}>
-            <div style={{ width: 70, height: 70, backgroundColor: COLORS.bg, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: `1px solid ${COLORS.border}` }}>
-              <Gamepad2 size={28} color={COLORS.textMuted} />
-            </div>
+            {game.image_url ? (
+              <img src={game.image_url} alt={game.name} style={{ width: 70, height: 70, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />
+            ) : (
+              <div style={{ width: 70, height: 70, backgroundColor: COLORS.bg, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: `1px solid ${COLORS.border}` }}>
+                <Gamepad2 size={28} color={COLORS.textMuted} />
+              </div>
+            )}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: COLORS.text }}>{game.name}</h3>
