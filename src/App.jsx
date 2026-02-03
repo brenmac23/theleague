@@ -24,7 +24,7 @@ function calculateMatchPoints({ placement, playerCount, durationMinutes, complex
   const adjustedBase = basePoints * (0.5 + 0.5 * beatRatio);
   
   const playerCountMult = SCORING_CONFIG.PLAYER_COUNT_MULTIPLIERS[Math.min(Math.max(playerCount, 2), 8)] || 1.0;
-  const timeMult = Math.max(0.7, Math.min(1.5, Math.sqrt(durationMinutes / 60)));
+  const timeMult = durationMinutes / 60;
   const complexityMult = Math.max(0.9, Math.min(1.15, 0.9 + complexity * 0.05));
   const gameTypeMult = isCoop ? 0.25 : isTeam ? 0.75 : 1.0;
   

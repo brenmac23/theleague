@@ -23,10 +23,8 @@ export const SCORING_CONFIG = {
     8: 1.20
   },
   
-  // Time multiplier settings (60 min baseline)
+  // Time multiplier settings (60 min baseline, linear scaling)
   TIME_BASELINE_MINUTES: 60,
-  TIME_MULTIPLIER_MIN: 0.1,
-  TIME_MULTIPLIER_MAX: 5.0,
   
   // Complexity multiplier settings (lighter weight than time)
   // Formula: COMPLEXITY_BASE + (complexity * COMPLEXITY_FACTOR)
@@ -48,7 +46,8 @@ export const SCORING_CONFIG = {
   RECENCY_FLOOR: 0.25,               // Minimum multiplier
   
   // Participation bonus
-  PARTICIPATION_BONUS_PER_GAME: 0.5
+  // Participation bonus - diminishing returns with sqrt
+  PARTICIPATION_MULTIPLIER: 2  // sqrt(games) × this value
 };
 
 /**
@@ -98,17 +97,10 @@ export function getPlayerCountMultiplier(playerCount) {
 /**
  * Calculate time multiplier based on game duration
  * @param {number} durationMinutes - Game duration in minutes
- * @returns {number} Time multiplier
+ * @returns {number} Time multiplier (linear: 60 min = 1.0x)
  */
 export function getTimeMultiplier(durationMinutes) {
-  const ratio = durationMinutes / SCORING_CONFIG.TIME_BASELINE_MINUTES;
-  // Use square root for smoother scaling
-  const multiplier = Math.sqrt(ratio);
-  
-  return Math.max(
-    SCORING_CONFIG.TIME_MULTIPLIER_MIN,
-    Math.min(SCORING_CONFIG.TIME_MULTIPLIER_MAX, multiplier)
-  );
+  return durationMinutes / SCORING_CONFIG.TIME_BASELINE_MINUTES;
 }
 
 /**
@@ -261,7 +253,7 @@ export function calculatePlayerScore(matchResults, referenceDate = new Date()) {
   
   const gamesPlayed = matchResults.length;
   const averagePoints = totalPoints / gamesPlayed;
-  const participationBonus = gamesPlayed * SCORING_CONFIG.PARTICIPATION_BONUS_PER_GAME;
+  const participationBonus = Math.sqrt(gamesPlayed) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER;
   const totalScore = averagePoints + participationBonus;
   
   return {
@@ -316,7 +308,7 @@ export function calculateAnnualScore(matchResults, year) {
   
   const gamesPlayed = yearResults.length;
   const averagePoints = totalPoints / gamesPlayed;
-  const participationBonus = gamesPlayed * SCORING_CONFIG.PARTICIPATION_BONUS_PER_GAME;
+  const participationBonus = Math.sqrt(gamesPlayed) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER;
   const totalScore = averagePoints + participationBonus;
   
   return {

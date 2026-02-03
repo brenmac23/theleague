@@ -19,8 +19,8 @@ import { parse } from 'csv-parse/sync';
 // CONFIGURATION - UPDATE THESE VALUES
 // ============================================
 
-const SUPABASE_URL = 'https://werodgvwsetdkrajgmid.supabase.co';
-const SUPABASE_KEY = 'sb_secret_CDW8SeD0CK4VrfFX_Xx5fg_sXMB5wI3'; // Use service role key for imports
+const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+const SUPABASE_KEY = 'YOUR_SUPABASE_SERVICE_ROLE_KEY'; // Use service role key for imports
 
 const CSV_FILE = './game_history.csv';
 
@@ -37,24 +37,17 @@ const CSV_FILE = './game_history.csv';
 
 const GAME_METADATA = {
   // Example entries - replace/add your actual games:
-  'Wingspan': { duration_minutes: 60, complexity: 2.47, is_coop: false, is_team: false },
+  'Wingspan': { duration_minutes: 60, complexity: 2.45, is_coop: false, is_team: false },
+  'Catan': { duration_minutes: 90, complexity: 2.32, is_coop: false, is_team: false },
+  'Pandemic': { duration_minutes: 45, complexity: 2.42, is_coop: true, is_team: false },
+  'Ticket to Ride': { duration_minutes: 60, complexity: 1.83, is_coop: false, is_team: false },
+  'Codenames': { duration_minutes: 20, complexity: 1.31, is_coop: false, is_team: true },
+  'Azul': { duration_minutes: 45, complexity: 1.77, is_coop: false, is_team: false },
+  'Splendor': { duration_minutes: 30, complexity: 1.78, is_coop: false, is_team: false },
+  'Carcassonne': { duration_minutes: 45, complexity: 1.91, is_coop: false, is_team: false },
+  '7 Wonders': { duration_minutes: 30, complexity: 2.33, is_coop: false, is_team: false },
+  'Dominion': { duration_minutes: 30, complexity: 2.36, is_coop: false, is_team: false },
   'Suburbia': { duration_minutes: 75, complexity: 2.76, is_coop: false, is_team: false },
-  'Ticket to Ride: North America': { duration_minutes: 45, complexity: 1.92, is_coop: false, is_team: false },
-  '7 Wonders': { duration_minutes: 40, complexity: 2.31, is_coop: false, is_team: false },
-  'Kingdomino': { duration_minutes: 18, complexity: 1.23, is_coop: false, is_team: false },
-  'Cards Against Humanity': { duration_minutes: 30, complexity: 1.17, is_coop: false, is_team: false },
-  'Ticket to Ride: Netherlands': { duration_minutes: 45, complexity: 2.14, is_coop: false, is_team: false },
-  'Jackbox: Fibbage 2': { duration_minutes: 20, complexity: 1.00, is_coop: false, is_team: false },
-  'Jackbox: Earwax': { duration_minutes: 20, complexity: 1.00, is_coop: false, is_team: false },
-  'Isle of Cats': { duration_minutes: 75, complexity: 2.36, is_coop: false, is_team: false },
-  'Tien Len': { duration_minutes: 5, complexity: 1.00, is_coop: false, is_team: false },
-  'Mysterium': { duration_minutes: 42, complexity: 1.89, is_coop: true, is_team: false },
-  'Flock Together': { duration_minutes: 75, complexity: 2.37, is_coop: true, is_team: false },  
-  'Faraway': { duration_minutes: 23, complexity: 1.91, is_coop: false, is_team: false },
-  'Qwirkle': { duration_minutes: 45, complexity: 1.58, is_coop: false, is_team: false },
-  'Heat: Pedal to the Metal': { duration_minutes: 60, complexity: 2.22, is_coop: false, is_team: false },
-  'Ecosystem': { duration_minutes: 23, complexity: 1.62, is_coop: false, is_team: false },
-  'Harmonies': { duration_minutes: 38, complexity: 2.01, is_coop: false, is_team: false },
   
   // ADD YOUR GAMES HERE - copy this format:
   // 'Game Name': { duration_minutes: XX, complexity: X.XX, is_coop: false, is_team: false },
