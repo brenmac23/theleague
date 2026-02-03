@@ -25,8 +25,8 @@ export const SCORING_CONFIG = {
   
   // Time multiplier settings (60 min baseline)
   TIME_BASELINE_MINUTES: 60,
-  TIME_MULTIPLIER_MIN: 0.7,
-  TIME_MULTIPLIER_MAX: 1.5,
+  TIME_MULTIPLIER_MIN: 0.1,
+  TIME_MULTIPLIER_MAX: 5.0,
   
   // Complexity multiplier settings (lighter weight than time)
   // Formula: COMPLEXITY_BASE + (complexity * COMPLEXITY_FACTOR)
