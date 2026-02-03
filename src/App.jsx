@@ -13,7 +13,7 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 const SCORING_CONFIG = {
   BASE_POINTS: [100, 70, 50, 35, 24, 16, 10, 6],
   PLAYER_COUNT_MULTIPLIERS: { 2: 0.60, 3: 0.75, 4: 0.90, 5: 1.00, 6: 1.10, 7: 1.15, 8: 1.20 },
-  PARTICIPATION_MULTIPLIER: 2  // sqrt(games) × this value
+  PARTICIPATION_MULTIPLIER: 1  // sqrt(games) × this value (reduced for balanced 100-scaled ratings)
 };
 
 function calculateMatchPoints({ placement, playerCount, durationMinutes, complexity, isCoop, isTeam, datePlayed, includeRecency = true }) {
@@ -159,7 +159,7 @@ function Modal({ isOpen, onClose, title, children }) {
   );
 }
 
-function Leaderboard({ players, matches }) {
+function Leaderboard({ players, matches, onPlayerClick }) {
   const rankings = useMemo(() => {
     const playerScores = {};
     players.forEach(p => { playerScores[p.id] = { player: p, totalPoints: 0, games: 0 }; });
@@ -175,7 +175,23 @@ function Leaderboard({ players, matches }) {
       });
     });
     
-    return Object.values(playerScores).map(ps => ({ ...ps.player, avgPoints: ps.games > 0 ? ps.totalPoints / ps.games : 0, participationBonus: Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER, totalScore: ps.games > 0 ? (ps.totalPoints / ps.games) + (Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER) : 0, gamesPlayed: ps.games })).sort((a, b) => b.totalScore - a.totalScore);
+    // Calculate raw scores first
+    const rawScores = Object.values(playerScores)
+      .filter(ps => ps.games > 0)
+      .map(ps => {
+        const avgPoints = ps.totalPoints / ps.games;
+        const participationBonus = Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER;
+        return { ...ps.player, avgPoints, participationBonus, rawScore: avgPoints + participationBonus, gamesPlayed: ps.games };
+      });
+    
+    // Calculate league average
+    const totalRawScore = rawScores.reduce((sum, p) => sum + p.rawScore, 0);
+    const leagueAverage = rawScores.length > 0 ? totalRawScore / rawScores.length : 1;
+    
+    // Scale to 100 = average (like wRC+)
+    return rawScores
+      .map(p => ({ ...p, scaledScore: Math.round((p.rawScore / leagueAverage) * 100) }))
+      .sort((a, b) => b.scaledScore - a.scaledScore);
   }, [players, matches]);
   
   return (
@@ -188,7 +204,7 @@ function Leaderboard({ players, matches }) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {rankings.map((player, idx) => (
-          <div key={player.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 14, backgroundColor: COLORS.bg, borderRadius: 10 }}>
+          <div key={player.id} onClick={() => onPlayerClick && onPlayerClick(player)} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 14, backgroundColor: COLORS.bg, borderRadius: 10, cursor: 'pointer', transition: 'background-color 0.2s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = COLORS.cardHover} onMouseLeave={e => e.currentTarget.style.backgroundColor = COLORS.bg}>
             <RankBadge rank={idx + 1} />
             <Avatar name={player.name} url={player.avatar_url} size={44} />
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -196,8 +212,8 @@ function Leaderboard({ players, matches }) {
               <div style={{ color: COLORS.textMuted, fontSize: 13 }}>{player.gamesPlayed} games played</div>
             </div>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontWeight: 700, fontSize: 22, color: COLORS.accent }}>{player.totalScore.toFixed(1)}</div>
-              <div style={{ color: COLORS.textMuted, fontSize: 11 }}>avg {player.avgPoints.toFixed(1)} + {player.participationBonus.toFixed(1)} bonus</div>
+              <div style={{ fontWeight: 700, fontSize: 22, color: player.scaledScore >= 100 ? COLORS.success : COLORS.accent }}>{player.scaledScore}</div>
+              <div style={{ color: COLORS.textMuted, fontSize: 11 }}>League avg: 100</div>
             </div>
           </div>
         ))}
@@ -408,7 +424,7 @@ function PlayerProfile({ player, matches, games, onClose }) {
   );
 }
 
-function AnnualChampions({ players, matches }) {
+function AnnualChampions({ players, matches, onYearClick }) {
   const currentYear = new Date().getFullYear();
   
   const years = useMemo(() => {
@@ -433,10 +449,26 @@ function AnnualChampions({ players, matches }) {
         });
       });
       
-      const rankings = Object.values(playerScores).filter(ps => ps.games > 0).map(ps => ({ ...ps.player, totalScore: (ps.totalPoints / ps.games) + (Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER), gamesPlayed: ps.games })).sort((a, b) => b.totalScore - a.totalScore);
-      return { year, champion: rankings[0], runnerUp: rankings[1] };
+      const rawScores = Object.values(playerScores).filter(ps => ps.games > 0).map(ps => {
+        const avgPoints = ps.totalPoints / ps.games;
+        const participationBonus = Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER;
+        return { ...ps.player, avgPoints, participationBonus, rawScore: avgPoints + participationBonus, gamesPlayed: ps.games };
+      });
+      
+      const totalRawScore = rawScores.reduce((sum, p) => sum + p.rawScore, 0);
+      const leagueAverage = rawScores.length > 0 ? totalRawScore / rawScores.length : 1;
+      
+      const rankings = rawScores
+        .map(p => ({ ...p, scaledScore: Math.round((p.rawScore / leagueAverage) * 100) }))
+        .sort((a, b) => b.scaledScore - a.scaledScore);
+      
+      return { year, champion: rankings[0], runnerUp: rankings[1], rankings, matchCount: yearMatches.length };
     });
   }, [years, players, matches]);
+  
+  if (champions.length === 0) {
+    return null;
+  }
   
   return (
     <Card>
@@ -447,19 +479,53 @@ function AnnualChampions({ players, matches }) {
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: COLORS.text }}>Annual Champions</h2>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {champions.map(({ year, champion, runnerUp }) => champion && (
-          <div key={year} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 14, backgroundColor: COLORS.bg, borderRadius: 10, border: `1px solid ${COLORS.border}` }}>
+        {champions.map(({ year, champion, runnerUp, rankings, matchCount }) => champion && (
+          <div key={year} onClick={() => onYearClick && onYearClick({ year, rankings, matchCount })} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 14, backgroundColor: COLORS.bg, borderRadius: 10, border: `1px solid ${COLORS.border}`, cursor: 'pointer', transition: 'background-color 0.2s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = COLORS.cardHover} onMouseLeave={e => e.currentTarget.style.backgroundColor = COLORS.bg}>
             <div style={{ fontWeight: 700, fontSize: 18, color: COLORS.gold, width: 50 }}>{year}</div>
             <Avatar name={champion.name} url={champion.avatar_url} size={40} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, color: COLORS.text }}>{champion.name}</div>
-              <div style={{ fontSize: 13, color: COLORS.textMuted }}>{champion.gamesPlayed} games · Score: {champion.totalScore.toFixed(1)}</div>
+              <div style={{ fontSize: 13, color: COLORS.textMuted }}>{champion.gamesPlayed} games · Score: {champion.scaledScore}</div>
             </div>
             {runnerUp && <div style={{ textAlign: 'right', color: COLORS.textMuted, fontSize: 13 }}>Runner-up: {runnerUp.name}</div>}
+            <ChevronRight size={18} color={COLORS.textMuted} />
           </div>
         ))}
       </div>
     </Card>
+  );
+}
+
+function YearDetailModal({ yearData, onClose }) {
+  if (!yearData) return null;
+  
+  const { year, rankings, matchCount } = yearData;
+  
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 48, fontWeight: 800, color: COLORS.gold }}>{year}</div>
+        <div style={{ color: COLORS.textMuted }}>{matchCount} games played</div>
+      </div>
+      
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {rankings.map((player, idx) => (
+          <div key={player.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12, backgroundColor: idx === 0 ? '#FFFBEB' : COLORS.bg, borderRadius: 8, border: idx === 0 ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.border}` }}>
+            <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: idx < 3 ? [{c: COLORS.gold}, {c: COLORS.silver}, {c: COLORS.bronze}][idx].c : COLORS.border, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: 12 }}>
+              {idx + 1}
+            </div>
+            <Avatar name={player.name} url={player.avatar_url} size={36} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, color: COLORS.text }}>{player.name}</div>
+              <div style={{ fontSize: 12, color: COLORS.textMuted }}>{player.gamesPlayed} games</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontWeight: 700, fontSize: 18, color: player.scaledScore >= 100 ? COLORS.success : COLORS.accent }}>{player.scaledScore}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -553,7 +619,7 @@ function HistoryPage({ matches, games, players }) {
             return (
               <div key={match.id} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 2fr 120px', padding: '14px 20px', borderBottom: idx < filteredMatches.length - 1 ? `1px solid ${COLORS.border}` : 'none', alignItems: 'center' }}>
                 <span style={{ fontSize: 13, color: COLORS.textMuted }}>
-                  {new Date(match.date_played).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}
+                  {new Date(match.date_played).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: '2-digit' })}
                 </span>
                 <div>
                   <span style={{ fontWeight: 500, color: COLORS.text }}>{match.games.name}</span>
@@ -594,7 +660,14 @@ function GamesPage({ games, matches }) {
         });
       });
       const sortedWinners = Object.entries(playerWins).sort((a, b) => b[1] - a[1]).slice(0, 3);
-      return { ...game, timesPlayed: gameMatches.length, lastPlayed: gameMatches[0]?.date_played, topPlayers: sortedWinners };
+      
+      // Calculate game weight (impact on scores)
+      const timeMult = game.duration_minutes / 60;
+      const complexityMult = Math.max(0.9, Math.min(1.15, 0.9 + parseFloat(game.complexity) * 0.05));
+      const typeMult = game.is_coop ? 0.25 : game.is_team ? 0.75 : 1.0;
+      const gameWeight = timeMult * complexityMult * typeMult;
+      
+      return { ...game, timesPlayed: gameMatches.length, lastPlayed: gameMatches[0]?.date_played, topPlayers: sortedWinners, gameWeight };
     }).sort((a, b) => b.timesPlayed - a.timesPlayed);
   }, [games, matches]);
   
@@ -615,6 +688,9 @@ function GamesPage({ games, matches }) {
               <div style={{ display: 'flex', gap: 16, color: COLORS.textMuted, fontSize: 13, marginBottom: 8, flexWrap: 'wrap' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Clock size={14} />{game.duration_minutes} min</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Brain size={14} />Complexity: {game.complexity}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: game.gameWeight >= 1 ? COLORS.success : COLORS.warning, fontWeight: 500 }}>
+                  <TrendingUp size={14} />Weight: {game.gameWeight.toFixed(2)}×
+                </span>
               </div>
               <div style={{ fontSize: 14 }}>
                 <span style={{ color: COLORS.accent, fontWeight: 500 }}>Played {game.timesPlayed} times</span>
@@ -772,6 +848,7 @@ export default function App() {
   const [games, setGames] = useState([]);
   const [matches, setMatches] = useState([]);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [selectedYear, setSelectedYear] = useState(null);
   const [showAddResult, setShowAddResult] = useState(false);
   const [showAddGame, setShowAddGame] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -959,8 +1036,8 @@ export default function App() {
         {view === 'home' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              <Leaderboard players={players} matches={matches} />
-              <AnnualChampions players={players} matches={matches} />
+              <Leaderboard players={players} matches={matches} onPlayerClick={setSelectedPlayer} />
+              <AnnualChampions players={players} matches={matches} onYearClick={setSelectedYear} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
               <RecentGames matches={matches} />
@@ -1001,6 +1078,10 @@ export default function App() {
       
       <Modal isOpen={!!selectedPlayer} onClose={() => setSelectedPlayer(null)} title="Player Profile">
         {selectedPlayer && <PlayerProfile player={selectedPlayer} matches={matches} games={games} onClose={() => setSelectedPlayer(null)} />}
+      </Modal>
+      
+      <Modal isOpen={!!selectedYear} onClose={() => setSelectedYear(null)} title={`${selectedYear?.year} Season`}>
+        {selectedYear && <YearDetailModal yearData={selectedYear} onClose={() => setSelectedYear(null)} />}
       </Modal>
     </div>
   );
