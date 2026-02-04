@@ -263,9 +263,6 @@ function RatingHistoryChart({ players, matches }) {
       // Get all matches up to and including this month
       const matchesToDate = sortedMatches.filter(m => m.date_played.substring(0, 7) <= monthKey);
       
-      // Skip if fewer than 10 matches (let ratings stabilize)
-      if (matchesToDate.length < 10) return null;
-      
       // Calculate scores for each player as of this date
       const playerScores = {};
       players.forEach(p => { playerScores[p.id] = { totalPoints: 0, games: 0 }; });
@@ -292,13 +289,13 @@ function RatingHistoryChart({ players, matches }) {
         });
       });
       
-      // Calculate raw scores
+      // Calculate raw scores (include all players for accurate league average)
       const rawScores = Object.entries(playerScores)
         .filter(([_, data]) => data.games > 0)
         .map(([id, data]) => {
           const avgPoints = data.totalPoints / data.games;
           const participationBonus = Math.sqrt(data.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER;
-          return { id, rawScore: avgPoints + participationBonus };
+          return { id, rawScore: avgPoints + participationBonus, games: data.games };
         });
       
       // Calculate league average and scale to 100
@@ -308,11 +305,12 @@ function RatingHistoryChart({ players, matches }) {
       const entry = { month: monthKey };
       players.forEach(p => {
         const playerData = rawScores.find(r => r.id === p.id);
-        entry[p.name] = playerData ? Math.round((playerData.rawScore / leagueAverage) * 100) : null;
+        // Only display score once player has 10+ games (let rating stabilize)
+        entry[p.name] = (playerData && playerData.games >= 10) ? Math.round((playerData.rawScore / leagueAverage) * 100) : null;
       });
       
       return entry;
-    }).filter(Boolean);
+    });
   }, [players, matches]);
   
   const playerColors = ['#4F46E5', '#DB2777', '#059669', '#D97706', '#0891B2'];
