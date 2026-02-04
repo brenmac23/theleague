@@ -263,6 +263,9 @@ function RatingHistoryChart({ players, matches }) {
       // Get all matches up to and including this month
       const matchesToDate = sortedMatches.filter(m => m.date_played.substring(0, 7) <= monthKey);
       
+      // Skip if fewer than 10 matches (let ratings stabilize)
+      if (matchesToDate.length < 10) return null;
+      
       // Calculate scores for each player as of this date
       const playerScores = {};
       players.forEach(p => { playerScores[p.id] = { totalPoints: 0, games: 0 }; });
@@ -309,7 +312,7 @@ function RatingHistoryChart({ players, matches }) {
       });
       
       return entry;
-    });
+    }).filter(Boolean);
   }, [players, matches]);
   
   const playerColors = ['#4F46E5', '#DB2777', '#059669', '#D97706', '#0891B2'];
@@ -723,10 +726,10 @@ function GamesPage({ games, matches }) {
                 </span>
               </div>
               <div style={{ fontSize: 14 }}>
-                <span style={{ color: COLORS.accent, fontWeight: 500 }}>Played {game.timesPlayed} times</span>
+                <span style={{ color: COLORS.accent, fontWeight: 500 }}>Played {game.timesPlayed} {game.timesPlayed === 1 ? 'time' : 'times'}</span>
                 {game.topPlayers.length > 0 && (
                   <span style={{ marginLeft: 16, color: COLORS.textMuted }}>
-                    Top: {game.topPlayers.map(([name, wins]) => `${name} (${wins} wins)`).join(', ')}
+                    Top: {game.topPlayers.map(([name, wins]) => `${name} (${wins} ${wins === 1 ? 'win' : 'wins'})`).join(', ')}
                   </span>
                 )}
               </div>
