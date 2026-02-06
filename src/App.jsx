@@ -310,7 +310,9 @@ function RatingHistoryChart({ players, matches }) {
       });
       
       return entry;
-    });
+    })
+    // Filter out months where no players have reached 10 games yet
+    .filter(entry => players.some(p => entry[p.name] !== null));
   }, [players, matches]);
   
   const playerColors = ['#4F46E5', '#DB2777', '#059669', '#D97706', '#0891B2'];
@@ -348,9 +350,23 @@ function PlayerProfile({ player, matches, games, onClose }) {
     let wins = 0, totalPlacement = 0;
     const gamePerformance = {};
     
-    playerMatches.forEach(match => {
+    // Sort matches by date for streak calculation
+    const sortedMatches = [...playerMatches].sort((a, b) => new Date(a.date_played) - new Date(b.date_played));
+    
+    // Calculate streaks
+    let currentStreak = 0;
+    let bestStreak = 0;
+    let tempStreak = 0;
+    
+    sortedMatches.forEach(match => {
       const result = match.match_results.find(r => r.player_id === player.id);
-      if (result.placement === 1) wins++;
+      if (result.placement === 1) {
+        wins++;
+        tempStreak++;
+        bestStreak = Math.max(bestStreak, tempStreak);
+      } else {
+        tempStreak = 0;
+      }
       totalPlacement += result.placement;
       const gameName = match.games.name;
       if (!gamePerformance[gameName]) gamePerformance[gameName] = { games: 0, wins: 0, totalPlacement: 0, losses: 0 };
@@ -359,6 +375,16 @@ function PlayerProfile({ player, matches, games, onClose }) {
       else gamePerformance[gameName].losses++;
       gamePerformance[gameName].totalPlacement += result.placement;
     });
+    
+    // Current streak (from most recent game backwards)
+    for (let i = sortedMatches.length - 1; i >= 0; i--) {
+      const result = sortedMatches[i].match_results.find(r => r.player_id === player.id);
+      if (result.placement === 1) {
+        currentStreak++;
+      } else {
+        break;
+      }
+    }
     
     const gameStats = Object.entries(gamePerformance).map(([name, data]) => ({
       name,
@@ -374,6 +400,8 @@ function PlayerProfile({ player, matches, games, onClose }) {
       wins,
       winRate: playerMatches.length > 0 ? (wins / playerMatches.length) * 100 : 0,
       avgPlacement: playerMatches.length > 0 ? totalPlacement / playerMatches.length : 0,
+      currentStreak,
+      bestStreak,
       gameStats,
       bestGames: [...gameStats].filter(g => g.games >= 2).sort((a, b) => b.winRate - a.winRate).slice(0, 3),
       worstGames: [...gameStats].filter(g => g.games >= 2).sort((a, b) => a.winRate - b.winRate).slice(0, 3)
@@ -388,9 +416,19 @@ function PlayerProfile({ player, matches, games, onClose }) {
           <h2 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: COLORS.text }}>{player.name}</h2>
           <p style={{ margin: '4px 0 0', color: COLORS.textMuted }}>{stats.totalGames} games played · {stats.wins} wins</p>
         </div>
-        <div style={{ backgroundColor: COLORS.accentLight, padding: 12, borderRadius: 10, textAlign: 'center', minWidth: 80 }}>
-          <div style={{ fontSize: 24, fontWeight: 700, color: COLORS.accent }}>{stats.winRate.toFixed(0)}%</div>
-          <div style={{ fontSize: 11, color: COLORS.textMuted }}>Win Rate</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ backgroundColor: COLORS.accentLight, padding: 12, borderRadius: 10, textAlign: 'center', minWidth: 70 }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: COLORS.accent }}>{stats.winRate.toFixed(0)}%</div>
+            <div style={{ fontSize: 10, color: COLORS.textMuted }}>Win Rate</div>
+          </div>
+          <div style={{ backgroundColor: stats.currentStreak > 0 ? '#FEF3C7' : COLORS.bg, padding: 12, borderRadius: 10, textAlign: 'center', minWidth: 50, border: `1px solid ${COLORS.border}` }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: stats.currentStreak > 0 ? COLORS.gold : COLORS.textMuted }}>{stats.currentStreak}</div>
+            <div style={{ fontSize: 10, color: COLORS.textMuted }}>Streak</div>
+          </div>
+          <div style={{ backgroundColor: COLORS.successLight, padding: 12, borderRadius: 10, textAlign: 'center', minWidth: 50 }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: COLORS.success }}>{stats.bestStreak}</div>
+            <div style={{ fontSize: 10, color: COLORS.textMuted }}>Best</div>
+          </div>
         </div>
       </div>
       
@@ -689,7 +727,7 @@ function GamesPage({ games, matches }) {
       const sortedWinners = Object.entries(playerWins).sort((a, b) => b[1] - a[1]).slice(0, 3);
       
       // Calculate game weight (impact on scores)
-      const timeMult = game.duration_minutes / 60;
+      const timeMult = game.duration_minutes / 45;
       const complexityMult = Math.max(0.9, Math.min(1.15, 0.9 + parseFloat(game.complexity) * 0.05));
       const typeMult = game.is_coop ? 0.25 : game.is_team ? 0.75 : 1.0;
       const gameWeight = timeMult * complexityMult * typeMult;
@@ -735,6 +773,173 @@ function GamesPage({ games, matches }) {
           </div>
         </Card>
       ))}
+    </div>
+  );
+}
+
+function AuditPage({ players, matches }) {
+  const [selectedMatch, setSelectedMatch] = useState(null);
+  
+  const auditData = useMemo(() => {
+    // Calculate current standings with full breakdown
+    const playerScores = {};
+    players.forEach(p => { playerScores[p.id] = { player: p, totalPoints: 0, games: 0, matchDetails: [] }; });
+    
+    matches.forEach(match => {
+      const playerCount = match.match_results.length;
+      match.match_results.forEach(result => {
+        if (playerScores[result.player_id]) {
+          const proportionBeaten = (playerCount - result.placement + 1) / playerCount;
+          const basePoints = Math.pow(proportionBeaten, SCORING_CONFIG.PLACEMENT_EXPONENT) * (playerCount / SCORING_CONFIG.BASELINE_PLAYERS) * 100;
+          const timeMult = match.games.duration_minutes / 45;
+          const complexityMult = Math.max(0.9, Math.min(1.15, 0.9 + parseFloat(match.games.complexity) * 0.05));
+          const gameTypeMult = match.games.is_coop ? 0.25 : match.games.is_team ? 0.75 : 1.0;
+          const daysSince = Math.floor((new Date() - new Date(match.date_played)) / (1000 * 60 * 60 * 24));
+          let recencyMult = 1.0;
+          if (daysSince > 365 * 4) recencyMult = 0.25;
+          else if (daysSince > 365) recencyMult = 1.0 - ((daysSince - 365) / (365 * 3)) * 0.75;
+          
+          const points = basePoints * timeMult * complexityMult * gameTypeMult * recencyMult;
+          
+          playerScores[result.player_id].totalPoints += points;
+          playerScores[result.player_id].games++;
+          playerScores[result.player_id].matchDetails.push({
+            matchId: match.id,
+            date: match.date_played,
+            game: match.games.name,
+            placement: result.placement,
+            playerCount,
+            basePoints: basePoints.toFixed(2),
+            timeMult: timeMult.toFixed(3),
+            complexityMult: complexityMult.toFixed(3),
+            gameTypeMult,
+            recencyMult: recencyMult.toFixed(3),
+            finalPoints: points.toFixed(2)
+          });
+        }
+      });
+    });
+    
+    const rawScores = Object.values(playerScores).filter(ps => ps.games > 0).map(ps => {
+      const avgPoints = ps.totalPoints / ps.games;
+      const participationBonus = Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER;
+      return { ...ps, avgPoints, participationBonus, rawScore: avgPoints + participationBonus };
+    });
+    
+    const totalRawScore = rawScores.reduce((sum, p) => sum + p.rawScore, 0);
+    const leagueAverage = rawScores.length > 0 ? totalRawScore / rawScores.length : 1;
+    
+    return rawScores.map(p => ({
+      ...p,
+      leagueAverage,
+      scaledScore: Math.round((p.rawScore / leagueAverage) * 100)
+    })).sort((a, b) => b.scaledScore - a.scaledScore);
+  }, [players, matches]);
+  
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <Card>
+        <h2 style={{ margin: '0 0 16px', fontSize: 20, fontWeight: 700, color: COLORS.text }}>🔍 Rating Audit</h2>
+        <p style={{ color: COLORS.textMuted, fontSize: 14, marginBottom: 20 }}>
+          Detailed breakdown of how current ratings are calculated. League average raw score: <strong>{auditData[0]?.leagueAverage.toFixed(2)}</strong>
+        </p>
+        
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ backgroundColor: COLORS.bg, borderBottom: `2px solid ${COLORS.border}` }}>
+                <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>Player</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Games</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Total Pts</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Avg Pts</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Part. Bonus</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Raw Score</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Scaled</th>
+              </tr>
+            </thead>
+            <tbody>
+              {auditData.map((p, idx) => (
+                <tr key={p.player.id} style={{ borderBottom: `1px solid ${COLORS.border}`, backgroundColor: idx % 2 === 0 ? 'white' : COLORS.bg }}>
+                  <td style={{ padding: '10px 12px', fontWeight: 500 }}>{p.player.name}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right' }}>{p.games}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right' }}>{p.totalPoints.toFixed(2)}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right' }}>{p.avgPoints.toFixed(2)}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right' }}>{p.participationBonus.toFixed(2)}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right' }}>{p.rawScore.toFixed(2)}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: p.scaledScore >= 100 ? COLORS.success : COLORS.accent }}>{p.scaledScore}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      
+      <Card>
+        <h3 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 600, color: COLORS.text }}>Match-by-Match Breakdown</h3>
+        <p style={{ color: COLORS.textMuted, fontSize: 13, marginBottom: 16 }}>Click a player above to see their match details, or view recent matches:</p>
+        
+        <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead style={{ position: 'sticky', top: 0, backgroundColor: 'white' }}>
+              <tr style={{ backgroundColor: COLORS.bg, borderBottom: `2px solid ${COLORS.border}` }}>
+                <th style={{ padding: '8px', textAlign: 'left' }}>Date</th>
+                <th style={{ padding: '8px', textAlign: 'left' }}>Game</th>
+                <th style={{ padding: '8px', textAlign: 'center' }}>Players</th>
+                <th style={{ padding: '8px', textAlign: 'left' }}>Results</th>
+                <th style={{ padding: '8px', textAlign: 'right' }}>Base</th>
+                <th style={{ padding: '8px', textAlign: 'right' }}>Time×</th>
+                <th style={{ padding: '8px', textAlign: 'right' }}>Cmplx×</th>
+                <th style={{ padding: '8px', textAlign: 'right' }}>Type×</th>
+                <th style={{ padding: '8px', textAlign: 'right' }}>Recncy×</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matches.slice(0, 20).map((match, idx) => {
+                const playerCount = match.match_results.length;
+                const sorted = [...match.match_results].sort((a, b) => a.placement - b.placement);
+                const timeMult = match.games.duration_minutes / 45;
+                const complexityMult = Math.max(0.9, Math.min(1.15, 0.9 + parseFloat(match.games.complexity) * 0.05));
+                const gameTypeMult = match.games.is_coop ? 0.25 : match.games.is_team ? 0.75 : 1.0;
+                const daysSince = Math.floor((new Date() - new Date(match.date_played)) / (1000 * 60 * 60 * 24));
+                let recencyMult = 1.0;
+                if (daysSince > 365 * 4) recencyMult = 0.25;
+                else if (daysSince > 365) recencyMult = 1.0 - ((daysSince - 365) / (365 * 3)) * 0.75;
+                
+                return (
+                  <tr key={match.id} style={{ borderBottom: `1px solid ${COLORS.border}`, backgroundColor: idx % 2 === 0 ? 'white' : COLORS.bg }}>
+                    <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>{new Date(match.date_played).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: '2-digit' })}</td>
+                    <td style={{ padding: '8px' }}>{match.games.name}</td>
+                    <td style={{ padding: '8px', textAlign: 'center' }}>{playerCount}</td>
+                    <td style={{ padding: '8px', fontSize: 11 }}>{sorted.map(r => `${r.placement}. ${r.players.name}`).join(', ')}</td>
+                    <td style={{ padding: '8px', textAlign: 'right' }}>{(100 * playerCount / SCORING_CONFIG.BASELINE_PLAYERS).toFixed(0)}</td>
+                    <td style={{ padding: '8px', textAlign: 'right' }}>{timeMult.toFixed(2)}</td>
+                    <td style={{ padding: '8px', textAlign: 'right' }}>{complexityMult.toFixed(2)}</td>
+                    <td style={{ padding: '8px', textAlign: 'right' }}>{gameTypeMult}</td>
+                    <td style={{ padding: '8px', textAlign: 'right' }}>{recencyMult.toFixed(2)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      
+      <Card>
+        <h3 style={{ margin: '0 0 12px', fontSize: 18, fontWeight: 600, color: COLORS.text }}>Scoring Formula</h3>
+        <div style={{ backgroundColor: COLORS.bg, padding: 16, borderRadius: 8, fontFamily: 'monospace', fontSize: 13, lineHeight: 1.8 }}>
+          <div><strong>Base Points</strong> = ((players - placement + 1) / players)^{SCORING_CONFIG.PLACEMENT_EXPONENT} × (players / {SCORING_CONFIG.BASELINE_PLAYERS}) × 100</div>
+          <div><strong>Time Mult</strong> = duration / 45 (45 min = 1.0×)</div>
+          <div><strong>Complexity Mult</strong> = 0.9 + (BGG complexity × 0.05), capped 0.9-1.15</div>
+          <div><strong>Game Type Mult</strong> = Normal: 1.0 | Team: 0.75 | Co-op: 0.25</div>
+          <div><strong>Recency Mult</strong> = 1.0 for first year, decays to 0.25 over next 3 years</div>
+          <div style={{ marginTop: 12, borderTop: `1px solid ${COLORS.border}`, paddingTop: 12 }}>
+            <strong>Final Points</strong> = Base × Time × Complexity × GameType × Recency
+          </div>
+          <div><strong>Participation Bonus</strong> = √(games) × {SCORING_CONFIG.PARTICIPATION_MULTIPLIER}</div>
+          <div><strong>Raw Score</strong> = Average Points + Participation Bonus</div>
+          <div><strong>Scaled Score</strong> = (Raw Score / League Average) × 100</div>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -1048,7 +1253,8 @@ export default function App() {
               { id: 'home', label: 'Home', icon: Trophy },
               { id: 'history', label: 'History', icon: History },
               { id: 'players', label: 'Players', icon: Users },
-              { id: 'games', label: 'Games', icon: Gamepad2 }
+              { id: 'games', label: 'Games', icon: Gamepad2 },
+              { id: 'audit', label: 'Audit', icon: Search }
             ].map(({ id, label, icon: Icon }) => (
               <button key={id} onClick={() => setView(id)} style={{ padding: '8px 14px', backgroundColor: view === id ? COLORS.accent : 'transparent', border: 'none', borderRadius: 8, color: view === id ? 'white' : COLORS.textMuted, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 500, transition: 'all 0.2s' }}>
                 <Icon size={16} />{label}
@@ -1097,6 +1303,8 @@ export default function App() {
         )}
         
         {view === 'games' && <GamesPage games={games} matches={matches} />}
+        
+        {view === 'audit' && <AuditPage players={players} matches={matches} />}
       </main>
       
       <Modal isOpen={showAddResult} onClose={() => setShowAddResult(false)} title="Add Game Result">
