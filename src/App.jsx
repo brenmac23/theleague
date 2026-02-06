@@ -160,26 +160,30 @@ function Modal({ isOpen, onClose, title, children }) {
 function Leaderboard({ players, matches, onPlayerClick }) {
   const rankings = useMemo(() => {
     const playerScores = {};
-    players.forEach(p => { playerScores[p.id] = { player: p, totalPoints: 0, games: 0 }; });
+    players.forEach(p => { playerScores[p.id] = { player: p, totalPoints: 0, totalPotential: 0, games: 0 }; });
     
     matches.forEach(match => {
       const playerCount = match.match_results.length;
+      // Calculate potential (1st place) points for this match
+      const potentialPoints = calculateMatchPoints({ placement: 1, playerCount, durationMinutes: match.games.duration_minutes, complexity: parseFloat(match.games.complexity), isCoop: match.games.is_coop, isTeam: match.games.is_team, datePlayed: match.date_played, includeRecency: true });
+      
       match.match_results.forEach(result => {
         if (playerScores[result.player_id]) {
           const points = calculateMatchPoints({ placement: result.placement, playerCount, durationMinutes: match.games.duration_minutes, complexity: parseFloat(match.games.complexity), isCoop: match.games.is_coop, isTeam: match.games.is_team, datePlayed: match.date_played, includeRecency: true });
           playerScores[result.player_id].totalPoints += points;
+          playerScores[result.player_id].totalPotential += potentialPoints;
           playerScores[result.player_id].games++;
         }
       });
     });
     
-    // Calculate raw scores first
+    // Calculate raw scores: points earned as ratio of potential + participation bonus
     const rawScores = Object.values(playerScores)
       .filter(ps => ps.games > 0)
       .map(ps => {
-        const avgPoints = ps.totalPoints / ps.games;
+        const pointsRatio = ps.totalPoints / ps.totalPotential; // What % of potential points earned
         const participationBonus = Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER;
-        return { ...ps.player, avgPoints, participationBonus, rawScore: avgPoints + participationBonus, gamesPlayed: ps.games };
+        return { ...ps.player, pointsRatio, participationBonus, rawScore: (pointsRatio * 100) + participationBonus, gamesPlayed: ps.games, totalPoints: ps.totalPoints, totalPotential: ps.totalPotential };
       });
     
     // Calculate league average
@@ -265,13 +269,25 @@ function RatingHistoryChart({ players, matches }) {
       
       // Calculate scores for each player as of this date
       const playerScores = {};
-      players.forEach(p => { playerScores[p.id] = { totalPoints: 0, games: 0 }; });
+      players.forEach(p => { playerScores[p.id] = { totalPoints: 0, totalPotential: 0, games: 0 }; });
       
       matchesToDate.forEach(match => {
         const playerCount = match.match_results.length;
+        // Calculate potential (1st place) points for this match
+        const potentialPoints = calculateMatchPoints({
+          placement: 1,
+          playerCount,
+          durationMinutes: match.games.duration_minutes,
+          complexity: parseFloat(match.games.complexity),
+          isCoop: match.games.is_coop,
+          isTeam: match.games.is_team,
+          datePlayed: match.date_played,
+          includeRecency: true,
+          referenceDate
+        });
+        
         match.match_results.forEach(result => {
           if (playerScores[result.player_id]) {
-            // Calculate points with recency relative to this historical date
             const points = calculateMatchPoints({
               placement: result.placement,
               playerCount,
@@ -284,18 +300,19 @@ function RatingHistoryChart({ players, matches }) {
               referenceDate
             });
             playerScores[result.player_id].totalPoints += points;
+            playerScores[result.player_id].totalPotential += potentialPoints;
             playerScores[result.player_id].games++;
           }
         });
       });
       
-      // Calculate raw scores (include all players for accurate league average)
+      // Calculate raw scores: points earned as ratio of potential + participation bonus
       const rawScores = Object.entries(playerScores)
         .filter(([_, data]) => data.games > 0)
         .map(([id, data]) => {
-          const avgPoints = data.totalPoints / data.games;
+          const pointsRatio = data.totalPoints / data.totalPotential;
           const participationBonus = Math.sqrt(data.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER;
-          return { id, rawScore: avgPoints + participationBonus, games: data.games };
+          return { id, rawScore: (pointsRatio * 100) + participationBonus, games: data.games };
         });
       
       // Calculate league average and scale to 100
@@ -502,22 +519,26 @@ function AnnualChampions({ players, matches, onYearClick }) {
     return years.map(year => {
       const yearMatches = matches.filter(m => new Date(m.date_played).getFullYear() === year);
       const playerScores = {};
-      players.forEach(p => { playerScores[p.id] = { player: p, totalPoints: 0, games: 0 }; });
+      players.forEach(p => { playerScores[p.id] = { player: p, totalPoints: 0, totalPotential: 0, games: 0 }; });
       
       yearMatches.forEach(match => {
+        const playerCount = match.match_results.length;
+        const potentialPoints = calculateMatchPoints({ placement: 1, playerCount, durationMinutes: match.games.duration_minutes, complexity: parseFloat(match.games.complexity), isCoop: match.games.is_coop, isTeam: match.games.is_team, datePlayed: match.date_played, includeRecency: false });
+        
         match.match_results.forEach(result => {
           if (playerScores[result.player_id]) {
-            const points = calculateMatchPoints({ placement: result.placement, playerCount: match.match_results.length, durationMinutes: match.games.duration_minutes, complexity: parseFloat(match.games.complexity), isCoop: match.games.is_coop, isTeam: match.games.is_team, datePlayed: match.date_played, includeRecency: false });
+            const points = calculateMatchPoints({ placement: result.placement, playerCount, durationMinutes: match.games.duration_minutes, complexity: parseFloat(match.games.complexity), isCoop: match.games.is_coop, isTeam: match.games.is_team, datePlayed: match.date_played, includeRecency: false });
             playerScores[result.player_id].totalPoints += points;
+            playerScores[result.player_id].totalPotential += potentialPoints;
             playerScores[result.player_id].games++;
           }
         });
       });
       
       const rawScores = Object.values(playerScores).filter(ps => ps.games > 0).map(ps => {
-        const avgPoints = ps.totalPoints / ps.games;
+        const pointsRatio = ps.totalPoints / ps.totalPotential;
         const participationBonus = Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER;
-        return { ...ps.player, avgPoints, participationBonus, rawScore: avgPoints + participationBonus, gamesPlayed: ps.games };
+        return { ...ps.player, pointsRatio, participationBonus, rawScore: (pointsRatio * 100) + participationBonus, gamesPlayed: ps.games };
       });
       
       const totalRawScore = rawScores.reduce((sum, p) => sum + p.rawScore, 0);
@@ -783,25 +804,30 @@ function AuditPage({ players, matches }) {
   const auditData = useMemo(() => {
     // Calculate current standings with full breakdown
     const playerScores = {};
-    players.forEach(p => { playerScores[p.id] = { player: p, totalPoints: 0, games: 0, matchDetails: [] }; });
+    players.forEach(p => { playerScores[p.id] = { player: p, totalPoints: 0, totalPotential: 0, games: 0, matchDetails: [] }; });
     
     matches.forEach(match => {
       const playerCount = match.match_results.length;
+      const timeMult = match.games.duration_minutes / 45;
+      const complexityMult = Math.max(0.9, Math.min(1.15, 0.9 + parseFloat(match.games.complexity) * 0.05));
+      const gameTypeMult = match.games.is_coop ? 0.25 : match.games.is_team ? 0.75 : 1.0;
+      const daysSince = Math.floor((new Date() - new Date(match.date_played)) / (1000 * 60 * 60 * 24));
+      let recencyMult = 1.0;
+      if (daysSince > 365 * 4) recencyMult = 0.25;
+      else if (daysSince > 365) recencyMult = 1.0 - ((daysSince - 365) / (365 * 3)) * 0.75;
+      
+      // Calculate potential (1st place) points for this match
+      const potentialBase = Math.pow(1, SCORING_CONFIG.PLACEMENT_EXPONENT) * (playerCount / SCORING_CONFIG.BASELINE_PLAYERS) * 100;
+      const potentialPoints = potentialBase * timeMult * complexityMult * gameTypeMult * recencyMult;
+      
       match.match_results.forEach(result => {
         if (playerScores[result.player_id]) {
           const proportionBeaten = (playerCount - result.placement + 1) / playerCount;
           const basePoints = Math.pow(proportionBeaten, SCORING_CONFIG.PLACEMENT_EXPONENT) * (playerCount / SCORING_CONFIG.BASELINE_PLAYERS) * 100;
-          const timeMult = match.games.duration_minutes / 45;
-          const complexityMult = Math.max(0.9, Math.min(1.15, 0.9 + parseFloat(match.games.complexity) * 0.05));
-          const gameTypeMult = match.games.is_coop ? 0.25 : match.games.is_team ? 0.75 : 1.0;
-          const daysSince = Math.floor((new Date() - new Date(match.date_played)) / (1000 * 60 * 60 * 24));
-          let recencyMult = 1.0;
-          if (daysSince > 365 * 4) recencyMult = 0.25;
-          else if (daysSince > 365) recencyMult = 1.0 - ((daysSince - 365) / (365 * 3)) * 0.75;
-          
           const points = basePoints * timeMult * complexityMult * gameTypeMult * recencyMult;
           
           playerScores[result.player_id].totalPoints += points;
+          playerScores[result.player_id].totalPotential += potentialPoints;
           playerScores[result.player_id].games++;
           playerScores[result.player_id].matchDetails.push({
             matchId: match.id,
@@ -810,6 +836,7 @@ function AuditPage({ players, matches }) {
             placement: result.placement,
             playerCount,
             basePoints: basePoints.toFixed(2),
+            potentialPoints: potentialPoints.toFixed(2),
             timeMult: timeMult.toFixed(3),
             complexityMult: complexityMult.toFixed(3),
             gameTypeMult,
@@ -821,9 +848,9 @@ function AuditPage({ players, matches }) {
     });
     
     const rawScores = Object.values(playerScores).filter(ps => ps.games > 0).map(ps => {
-      const avgPoints = ps.totalPoints / ps.games;
+      const pointsRatio = ps.totalPoints / ps.totalPotential;
       const participationBonus = Math.sqrt(ps.games) * SCORING_CONFIG.PARTICIPATION_MULTIPLIER;
-      return { ...ps, avgPoints, participationBonus, rawScore: avgPoints + participationBonus };
+      return { ...ps, pointsRatio, participationBonus, rawScore: (pointsRatio * 100) + participationBonus };
     });
     
     const totalRawScore = rawScores.reduce((sum, p) => sum + p.rawScore, 0);
@@ -851,7 +878,8 @@ function AuditPage({ players, matches }) {
                 <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600 }}>Player</th>
                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Games</th>
                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Total Pts</th>
-                <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Avg Pts</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Potential</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Pts %</th>
                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Part. Bonus</th>
                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Raw Score</th>
                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600 }}>Scaled</th>
@@ -863,7 +891,8 @@ function AuditPage({ players, matches }) {
                   <td style={{ padding: '10px 12px', fontWeight: 500 }}>{p.player.name}</td>
                   <td style={{ padding: '10px 12px', textAlign: 'right' }}>{p.games}</td>
                   <td style={{ padding: '10px 12px', textAlign: 'right' }}>{p.totalPoints.toFixed(2)}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right' }}>{p.avgPoints.toFixed(2)}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right' }}>{p.totalPotential.toFixed(2)}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right' }}>{(p.pointsRatio * 100).toFixed(1)}%</td>
                   <td style={{ padding: '10px 12px', textAlign: 'right' }}>{p.participationBonus.toFixed(2)}</td>
                   <td style={{ padding: '10px 12px', textAlign: 'right' }}>{p.rawScore.toFixed(2)}</td>
                   <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: p.scaledScore >= 100 ? COLORS.success : COLORS.accent }}>{p.scaledScore}</td>
@@ -933,10 +962,12 @@ function AuditPage({ players, matches }) {
           <div><strong>Game Type Mult</strong> = Normal: 1.0 | Team: 0.75 | Co-op: 0.25</div>
           <div><strong>Recency Mult</strong> = 1.0 for first year, decays to 0.25 over next 3 years</div>
           <div style={{ marginTop: 12, borderTop: `1px solid ${COLORS.border}`, paddingTop: 12 }}>
-            <strong>Final Points</strong> = Base × Time × Complexity × GameType × Recency
+            <strong>Match Points</strong> = Base × Time × Complexity × GameType × Recency
           </div>
+          <div><strong>Potential Points</strong> = 1st place points for that match (with all multipliers)</div>
+          <div><strong>Points Ratio</strong> = Total Points ÷ Total Potential (% of possible points earned)</div>
           <div><strong>Participation Bonus</strong> = √(games) × {SCORING_CONFIG.PARTICIPATION_MULTIPLIER}</div>
-          <div><strong>Raw Score</strong> = Average Points + Participation Bonus</div>
+          <div><strong>Raw Score</strong> = (Points Ratio × 100) + Participation Bonus</div>
           <div><strong>Scaled Score</strong> = (Raw Score / League Average) × 100</div>
         </div>
       </Card>
