@@ -13,7 +13,7 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 const SCORING_CONFIG = {
   PLACEMENT_EXPONENT: 1.25,  // Higher = more reward for winning
   BASELINE_PLAYERS: 4,       // 4-player game is the baseline
-  PARTICIPATION_MULTIPLIER: 1  // sqrt(games) × this value
+  PARTICIPATION_MULTIPLIER: 1.5  // sqrt(games) × this value
 };
 
 function calculateMatchPoints({ placement, playerCount, durationMinutes, complexity, isCoop, isTeam, datePlayed, includeRecency = true, referenceDate = null }) {
@@ -21,7 +21,7 @@ function calculateMatchPoints({ placement, playerCount, durationMinutes, complex
   const proportionBeaten = (playerCount - placement + 1) / playerCount;
   const basePoints = Math.pow(proportionBeaten, SCORING_CONFIG.PLACEMENT_EXPONENT) * (playerCount / SCORING_CONFIG.BASELINE_PLAYERS) * 100;
   
-  const timeMult = durationMinutes / 60;
+  const timeMult = durationMinutes / 45;
   const complexityMult = Math.max(0.9, Math.min(1.15, 0.9 + complexity * 0.05));
   const gameTypeMult = isCoop ? 0.25 : isTeam ? 0.75 : 1.0;
   
