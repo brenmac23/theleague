@@ -13,7 +13,7 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 const SCORING_CONFIG = {
   PLACEMENT_EXPONENT: 1.25,  // Higher = more reward for winning
   BASELINE_PLAYERS: 4,       // 4-player game is the baseline
-  PARTICIPATION_MULTIPLIER: 1.5  // sqrt(games) × this value
+  PARTICIPATION_MULTIPLIER: 1  // sqrt(games) × this value
 };
 
 function calculateMatchPoints({ placement, playerCount, durationMinutes, complexity, isCoop, isTeam, datePlayed, includeRecency = true, referenceDate = null }) {
@@ -548,11 +548,19 @@ function AnnualChampions({ players, matches, onYearClick }) {
         .map(p => ({ ...p, scaledScore: Math.round((p.rawScore / leagueAverage) * 100) }))
         .sort((a, b) => b.scaledScore - a.scaledScore);
       
-      return { year, champion: rankings[0], runnerUp: rankings[1], rankings, matchCount: yearMatches.length };
+      // Only players with 5+ games qualify for champion
+      const qualifiedRankings = rankings.filter(p => p.gamesPlayed >= 5);
+      const champion = qualifiedRankings[0] || null;
+      const runnerUp = qualifiedRankings[1] || null;
+      
+      return { year, champion, runnerUp, rankings, matchCount: yearMatches.length };
     });
   }, [years, players, matches]);
   
-  if (champions.length === 0) {
+  // Filter out years with no qualified champion
+  const validChampions = champions.filter(c => c.champion !== null);
+  
+  if (validChampions.length === 0) {
     return null;
   }
   
@@ -565,7 +573,7 @@ function AnnualChampions({ players, matches, onYearClick }) {
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: COLORS.text }}>Annual Champions</h2>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {champions.map(({ year, champion, runnerUp, rankings, matchCount }) => champion && (
+        {validChampions.map(({ year, champion, runnerUp, rankings, matchCount }) => (
           <div key={year} onClick={() => onYearClick && onYearClick({ year, rankings, matchCount })} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 14, backgroundColor: COLORS.bg, borderRadius: 10, border: `1px solid ${COLORS.border}`, cursor: 'pointer', transition: 'background-color 0.2s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = COLORS.cardHover} onMouseLeave={e => e.currentTarget.style.backgroundColor = COLORS.bg}>
             <div style={{ fontWeight: 700, fontSize: 18, color: COLORS.gold, width: 50 }}>{year}</div>
             <Avatar name={champion.name} url={champion.avatar_url} size={40} />
@@ -586,30 +594,47 @@ function YearDetailModal({ yearData, onClose }) {
   if (!yearData) return null;
   
   const { year, rankings, matchCount } = yearData;
+  const MIN_GAMES_TO_QUALIFY = 5;
+  
+  // Sort: qualified players first (by score), then unqualified (by score)
+  const sortedRankings = [...rankings].sort((a, b) => {
+    const aQualified = a.gamesPlayed >= MIN_GAMES_TO_QUALIFY;
+    const bQualified = b.gamesPlayed >= MIN_GAMES_TO_QUALIFY;
+    if (aQualified && !bQualified) return -1;
+    if (!aQualified && bQualified) return 1;
+    return b.scaledScore - a.scaledScore;
+  });
+  
+  const qualifiedCount = rankings.filter(p => p.gamesPlayed >= MIN_GAMES_TO_QUALIFY).length;
   
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: 48, fontWeight: 800, color: COLORS.gold }}>{year}</div>
-        <div style={{ color: COLORS.textMuted }}>{matchCount} games played</div>
+        <div style={{ color: COLORS.textMuted }}>{matchCount} games played · {MIN_GAMES_TO_QUALIFY}+ games to qualify</div>
       </div>
       
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {rankings.map((player, idx) => (
-          <div key={player.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12, backgroundColor: idx === 0 ? '#FFFBEB' : COLORS.bg, borderRadius: 8, border: idx === 0 ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.border}` }}>
-            <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: idx < 3 ? [{c: COLORS.gold}, {c: COLORS.silver}, {c: COLORS.bronze}][idx].c : COLORS.border, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: 12 }}>
-              {idx + 1}
+        {sortedRankings.map((player, idx) => {
+          const qualified = player.gamesPlayed >= MIN_GAMES_TO_QUALIFY;
+          const qualifiedIdx = qualified ? rankings.filter(p => p.gamesPlayed >= MIN_GAMES_TO_QUALIFY).findIndex(p => p.id === player.id) : -1;
+          
+          return (
+            <div key={player.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12, backgroundColor: qualifiedIdx === 0 ? '#FFFBEB' : COLORS.bg, borderRadius: 8, border: qualifiedIdx === 0 ? `2px solid ${COLORS.gold}` : `1px solid ${COLORS.border}`, opacity: qualified ? 1 : 0.5 }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: qualified && qualifiedIdx < 3 ? [{c: COLORS.gold}, {c: COLORS.silver}, {c: COLORS.bronze}][qualifiedIdx].c : COLORS.border, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: 12 }}>
+                {qualified ? qualifiedIdx + 1 : '-'}
+              </div>
+              <Avatar name={player.name} url={player.avatar_url} size={36} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, color: COLORS.text }}>{player.name}</div>
+                <div style={{ fontSize: 12, color: COLORS.textMuted }}>{player.gamesPlayed} games{!qualified && ' (not qualified)'}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontWeight: 700, fontSize: 18, color: player.scaledScore >= 100 ? COLORS.success : COLORS.accent }}>{player.scaledScore}</div>
+              </div>
             </div>
-            <Avatar name={player.name} url={player.avatar_url} size={36} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, color: COLORS.text }}>{player.name}</div>
-              <div style={{ fontSize: 12, color: COLORS.textMuted }}>{player.gamesPlayed} games</div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontWeight: 700, fontSize: 18, color: player.scaledScore >= 100 ? COLORS.success : COLORS.accent }}>{player.scaledScore}</div>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
